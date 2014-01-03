@@ -140,10 +140,17 @@ def choose(seq):
     """
     res = []
     seq.sort(key=lambda x:x["distance"])
+    # Get the closest
     res.append(seq[0])
+    # Get places that are further away, if they have a greather importance
     for c in seq[1:]:
         if res[-1]["importance"] < c["importance"]:
             res.append(c)
+    # Add the place with the shortest name
+    minlen = min(len(x["name"]) for x in res)
+    minval = min(seq, key=lambda x:len(x["name"]))
+    if len(minval["name"]) < minlen:
+        res.append(minval)
     return res
 
 
