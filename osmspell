@@ -76,7 +76,7 @@ def get_center(place):
         for idx, p in enumerate(data, start=1):
             print("{}: {}".format(idx, p["display_name"]))
         val = raw_input("Choose one: ")
-        sel = data[int(val)]
+        sel = data[int(val)-1]
     elif len(data) == 1:
         sel = data[0]
     else:
