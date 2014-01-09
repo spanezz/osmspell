@@ -161,7 +161,7 @@ if __name__ == "__main__":
     center = get_center(args.place)
 
     print("Center: {}, {}".format(*center))
-    dom = load_data(center)
+    dom = load_data(center, 0.3)
     alphabet = dispatch_alphabet(dom)
 
     for l in sorted(alphabet.iterkeys()):
