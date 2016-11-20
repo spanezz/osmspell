@@ -236,7 +236,7 @@ def main():
 
     for l in sorted(alphabet.by_letter.keys()):
         cands = alphabet.choose(l)
-        print(l, ", ".join(x.name for x in cands))
+        print(l, "as in", ", ".join(x.name for x in cands))
 
 
 #    print("Center: {lat}, {lon}".format(**center))
