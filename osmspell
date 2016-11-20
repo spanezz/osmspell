@@ -1,6 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # coding: utf8
-# Copyright (C) 2014  Enrico Zini <enrico@debian.org>
+# Copyright (C) 2014--2016  Enrico Zini <enrico@debian.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as
@@ -14,156 +14,239 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
-import xml.etree.cElementTree as ET
+import overpass
 import requests
 import math
 import argparse
+from collections import defaultdict
 
-# https://gist.github.com/gabesmed/1826175
-EARTH_RADIUS = 6378137     # earth radius in meters
-def great_circle_distance(latlong_a, latlong_b):
-    """
-    >>> coord_pairs = [
-    ...     # between eighth and 31st and eighth and 30th
-    ...     [(40.750307,-73.994819), (40.749641,-73.99527)],
-    ...     # sanfran to NYC ~2568 miles
-    ...     [(37.784750,-122.421180), (40.714585,-74.007202)],
-    ...     # about 10 feet apart
-    ...     [(40.714732,-74.008091), (40.714753,-74.008074)],
-    ...     # inches apart
-    ...     [(40.754850,-73.975560), (40.754851,-73.975561)],
-    ... ]
 
-    >>> for pair in coord_pairs:
-    ...     great_circle_distance(pair[0], pair[1]) # doctest: +ELLIPSIS
-    83.325362855055...
-    4133342.6554530...
-    2.7426970360283...
-    0.1396525521278...
-    """
-    lat1, lon1 = latlong_a
-    lat2, lon2 = latlong_b
+class IgnorePlace(Exception):
+    pass
 
-    dLat = math.radians(lat2 - lat1)
-    dLon = math.radians(lon2 - lon1)
-    a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
-            math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-            math.sin(dLon / 2) * math.sin(dLon / 2))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    d = EARTH_RADIUS * c
+class Distance:
+    EARTH_RADIUS = 6378137     # earth radius in meters
 
-    return d
+    def __init__(self, center):
+        self.center = center
 
-def place_type_name(node):
-    type, name = None, None
-    for t in node.findall(".//tag[@k='place']"):
-        type = t.attrib["v"]
-    for t in node.findall(".//tag[@k='name']"):
-        name = t.attrib["v"]
-    return type, name
+    # https://gist.github.com/gabesmed/1826175
+    def great_circle_distance(self, latlong_a, latlong_b):
+        """
+        >>> coord_pairs = [
+        ...     # between eighth and 31st and eighth and 30th
+        ...     [(40.750307,-73.994819), (40.749641,-73.99527)],
+        ...     # sanfran to NYC ~2568 miles
+        ...     [(37.784750,-122.421180), (40.714585,-74.007202)],
+        ...     # about 10 feet apart
+        ...     [(40.714732,-74.008091), (40.714753,-74.008074)],
+        ...     # inches apart
+        ...     [(40.754850,-73.975560), (40.754851,-73.975561)],
+        ... ]
 
-def get_center(place):
-    res = requests.get("http://nominatim.openstreetmap.org/search", params={
-        "q": place,
-        "format": "json",
-    })
-    data = res.json()
-    if len(data) > 1:
-        for idx, p in enumerate(data, start=1):
-            print("{}: {}".format(idx, p["display_name"]))
-        val = raw_input("Choose one: ")
-        sel = data[int(val)-1]
-    elif len(data) == 1:
-        sel = data[0]
-    else:
-        raise RuntimeError("no places found")
-    return float(sel["lat"]), float(sel["lon"])
+        >>> for pair in coord_pairs:
+        ...     great_circle_distance(pair[0], pair[1]) # doctest: +ELLIPSIS
+        83.325362855055...
+        4133342.6554530...
+        2.7426970360283...
+        0.1396525521278...
+        """
+        lat1, lon1 = latlong_a
+        lat2, lon2 = latlong_b
 
-def load_data(center, bbox_side=0.5):
-    """
-    Load place name data for our area, given a (lat, lon) center and a bounding
-    box side length in degrees
-    """
-    info = {
-        "left": center[1] - bbox_side/2,
-        "bottom": center[0] - bbox_side/2,
-        "right": center[1] + bbox_side/2,
-        "top": center[0] + bbox_side/2,
-        "side": bbox_side,
-    }
-    cache = "{left},{bottom},{right},{top}-{side}.xml".format(**info)
-    try:
-        with open(cache, "r") as fd:
-            dom = ET.fromstring(fd.read())
-    except IOError:
-        print("Fetching places from jxapi.openstreetmap.org...")
-        url = "http://jxapi.openstreetmap.org/xapi/api/0.6/node[place=*][bbox={left},{bottom},{right},{top}]".format(**info)
-        #print(url)
-        res = requests.get(url)
-        text = res.text.encode("utf8")
-        dom = ET.fromstring(text)
-        with open(cache, "w") as fd:
-            fd.write(text)
-    return dom
+        dLat = math.radians(lat2 - lat1)
+        dLon = math.radians(lon2 - lon1)
+        a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
+                math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+                math.sin(dLon / 2) * math.sin(dLon / 2))
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        d = self.EARTH_RADIUS * c
+        return d
 
-def dispatch_alphabet(dom):
+    def __call__(self, geom):
+        coord = geom["coordinates"]
+        return self.great_circle_distance(self.center, coord)
+
+
+class Place:
     importance = {
-        "city": 10,
-        "town": 9,
-        "village": 8,
-        "suburb": 7,
-        "hamlet": 6,
-        "locality": 5,
+            "country":         1000,
+            "state":            900,
+            "region":           800,
+            "province":         700,
+            "district":         600,
+            "county":           500,
+            "municipality":     400,
+            "city":             300,
+            "borough":          200,
+            "suburb":           100,
+            "quarter":           50,
+            "neighbourhood":     30,
+            "city_block":        20,
+            "plot":              10,
+            "town":             250,
+            "village":          150,
+            "hamlet":            80,
+            "isolated_dwelling": 40,
+            "farm":              15,
+            "allotments":         5,
     }
-    alphabet = {}
-    for n in dom.findall(".//node"):
-        coord = (float(n.attrib["lat"]), float(n.attrib["lon"]))
-        ptype, pname = place_type_name(n)
-        if ptype is None or pname is None: continue
-        alphabet.setdefault(pname[0].upper(), []).append({
-            "name": pname,
-            "type": ptype,
-            "coord": coord,
-            "distance": great_circle_distance(center, coord),
-            "importance": importance.get(ptype, 0),
-        })
-    return alphabet
 
-def choose(seq):
-    """
-    Choose a minimal set of places from a list of all places for a single
-    letter
-    """
-    res = []
-    seq.sort(key=lambda x:x["distance"])
-    # Get the closest
-    res.append(seq[0])
-    # Get places that are further away, if they have a greather importance
-    for c in seq[1:]:
-        if res[-1]["importance"] < c["importance"]:
-            res.append(c)
-    # Add the place with the shortest name
-    minlen = min(len(x["name"]) for x in res)
-    minval = min(seq, key=lambda x:len(x["name"]))
-    if len(minval["name"]) < minlen:
-        res.append(minval)
-    return res
+    def __init__(self, feature, distance=None):
+        self.feature = feature
+        properties = feature["properties"]
+        self.name = properties.get("name", None)
+        if self.name is None: raise IgnorePlace
+        self.place = properties.get("place", None)
+        if self.place is None: raise IgnorePlace
+        self.importance = self.importance.get(self.place, None)
+        if self.importance is None: raise IgnorePlace
+        self.geometry = feature["geometry"]
+        if distance is not None:
+            self.distance = distance(self.geometry)
+        else:
+            self.distance = None
+
+    def __str__(self):
+        return "{p.place}:{p.name}".format(p=self)
+
+
+class Alphabet:
+    def __init__(self):
+        self.by_letter = defaultdict(list)
+
+    def add_place(self, place):
+        coord = place.geometry["coordinates"]
+        self.by_letter[place.name.upper()[0]].append(place)
+
+    def choose(self, letter):
+        """
+        Choose a minimal set of places from a list of all places for a single
+        letter
+        """
+        seq = self.by_letter.get(letter, None)
+        if seq is None: return None
+
+        res = []
+        seq.sort(key=lambda x:x.distance)
+        # Get the closest
+        res.append(seq[0])
+        # Get places that are further away, if they have a greather importance
+        for c in seq[1:]:
+            if res[-1].importance < c.importance:
+                res.append(c)
+        # Add the place with the shortest name
+        minlen = min(len(x.name) for x in res)
+        minval = min(seq, key=lambda x:len(x.name))
+        if len(minval.name) < minlen:
+            res.append(minval)
+        return res
+
+
+class Osmspell:
+    def __init__(self):
+        self.api = overpass.API()
+
+    def get_center(self, place):
+        res = requests.get("http://nominatim.openstreetmap.org/search", params={
+            "q": place,
+            "format": "json",
+        })
+        data = res.json()
+        if len(data) > 1:
+            for idx, p in enumerate(data, start=1):
+                print("{}: {}".format(idx, p["display_name"]))
+            val = input("Choose one: ")
+            sel = data[int(val)-1]
+        elif len(data) == 1:
+            sel = data[0]
+        else:
+            raise RuntimeError("no places found")
+        return sel
+
+    def get_surroundings(self, place, distance):
+        """
+        Query places no more than `distance` meters from `place_id`
+        """
+        lat1, lat2, lon1, lon2 = [float(x) for x in place["boundingbox"]]
+        distance_func = Distance(((lat1 + lat2) / 2, (lon1 + lon2) / 2))
+        query = """
+node({latmin},{lonmin},{latmax},{lonmax})["place"];
+node(around:{distance})["place"];
+out meta;
+""".strip().format(
+            latmin=min(lat1, lat2),
+            lonmin=min(lon1, lon2),
+            latmax=max(lat1, lat2),
+            lonmax=max(lon1, lon2),
+            distance=int(distance)
+        )
+        #print("Query:", query)
+        response = self.api.Get(query)
+        for f in response["features"]:
+            try:
+                yield Place(f, distance_func)
+            except IgnorePlace:
+                continue
+
+
+#def load_data(center, bbox_side=0.5):
+#    """
+#    Load place name data for our area, given a (lat, lon) center and a bounding
+#    box side length in degrees
+#    """
+#    info = {
+#        "left": center[1] - bbox_side/2,
+#        "bottom": center[0] - bbox_side/2,
+#        "right": center[1] + bbox_side/2,
+#        "top": center[0] + bbox_side/2,
+#        "side": bbox_side,
+#    }
+#    cache = "{left},{bottom},{right},{top}-{side}.xml".format(**info)
+#    try:
+#        with open(cache, "r") as fd:
+#            dom = ET.fromstring(fd.read())
+#    except IOError:
+#        url = "http://overpass.osm.rambler.ru/cgi/xapi_meta"
+#        print("Fetching places from {}...".format(url))
+#        query = "node({left},{bottom},{right},{top}); out body;".format(**info)
+#        print("query:", query)
+#        #url = "http://jxapi.openstreetmap.org/xapi/api/0.6/node[place=*][bbox={left},{bottom},{right},{top}]".format(**info)
+#        #print(url)
+#        res = requests.post(url, data={"data": query})
+#        text = res.text.encode("utf8")
+#        print(text)
+#        dom = ET.fromstring(text)
+#        with open(cache, "w") as fd:
+#            fd.write(text)
+#    return dom
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("place", metavar="string", help="Place name to use as a center")
+    parser.add_argument("--distance", metavar="km", type=float, default=20, help="Distance in km from the place, where names are looked up")
+    args = parser.parse_args()
+
+    osmspell = Osmspell()
+    center = osmspell.get_center(args.place)
+    alphabet = Alphabet()
+    for place in osmspell.get_surroundings(center, args.distance * 1000):
+        alphabet.add_place(place)
+
+    for l in sorted(alphabet.by_letter.keys()):
+        cands = alphabet.choose(l)
+        print(l, ", ".join(x.name for x in cands))
+
+
+#    print("Center: {lat}, {lon}".format(**center))
+#    dom = load_data(center, args.side)
+#    alphabet = dispatch_alphabet(dom)
+#
+#    for l in sorted(alphabet.iterkeys()):
+#        cands = choose(alphabet[l])
+#        print(l, ", ".join(x["name"] for x in cands))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("place", metavar="string", help="Place name to use as a center")
-    args = parser.parse_args()
-    center = get_center(args.place)
-
-    print("Center: {}, {}".format(*center))
-    dom = load_data(center, 0.3)
-    alphabet = dispatch_alphabet(dom)
-
-    for l in sorted(alphabet.iterkeys()):
-        cands = choose(alphabet[l])
-        print(l, ", ".join(x["name"] for x in cands))
+    main()
