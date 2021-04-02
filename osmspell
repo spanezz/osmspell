@@ -24,6 +24,7 @@ from collections import defaultdict
 class IgnorePlace(Exception):
     pass
 
+
 class Distance:
     EARTH_RADIUS = 6378137     # earth radius in meters
 
@@ -57,8 +58,8 @@ class Distance:
         dLat = math.radians(lat2 - lat1)
         dLon = math.radians(lon2 - lon1)
         a = (math.sin(dLat / 2) * math.sin(dLat / 2) +
-                math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-                math.sin(dLon / 2) * math.sin(dLon / 2))
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dLon / 2) * math.sin(dLon / 2))
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         d = self.EARTH_RADIUS * c
         return d
@@ -80,27 +81,30 @@ class Place:
             "city":             300,
             "borough":          200,
             "suburb":           100,
-            "quarter":           50,
-            "neighbourhood":     30,
-            "city_block":        20,
-            "plot":              10,
+            # "quarter":           50,
+            # "neighbourhood":     30,
+            # "city_block":        20,
+            # "plot":              10,
             "town":             250,
             "village":          150,
             "hamlet":            80,
-            "isolated_dwelling": 40,
-            "farm":              15,
-            "allotments":         5,
+            # "isolated_dwelling": 40,
+            # "farm":              15,
+            # "allotments":         5,
     }
 
     def __init__(self, feature, distance=None):
         self.feature = feature
         properties = feature["properties"]
         self.name = properties.get("name", None)
-        if self.name is None: raise IgnorePlace
+        if self.name is None:
+            raise IgnorePlace
         self.place = properties.get("place", None)
-        if self.place is None: raise IgnorePlace
+        if self.place is None:
+            raise IgnorePlace
         self.importance = self.importance.get(self.place, None)
-        if self.importance is None: raise IgnorePlace
+        if self.importance is None:
+            raise IgnorePlace
         self.geometry = feature["geometry"]
         if distance is not None:
             self.distance = distance(self.geometry)
@@ -116,7 +120,7 @@ class Alphabet:
         self.by_letter = defaultdict(list)
 
     def add_place(self, place):
-        coord = place.geometry["coordinates"]
+        # coord = place.geometry["coordinates"]
         self.by_letter[place.name.upper()[0]].append(place)
 
     def choose(self, letter):
@@ -125,10 +129,11 @@ class Alphabet:
         letter
         """
         seq = self.by_letter.get(letter, None)
-        if seq is None: return None
+        if seq is None:
+            return None
 
         res = []
-        seq.sort(key=lambda x:x.distance)
+        seq.sort(key=lambda x: x.distance)
         # Get the closest
         res.append(seq[0])
         # Get places that are further away, if they have a greather importance
@@ -137,7 +142,7 @@ class Alphabet:
                 res.append(c)
         # Add the place with the shortest name
         minlen = min(len(x.name) for x in res)
-        minval = min(seq, key=lambda x:len(x.name))
+        minval = min(seq, key=lambda x: len(x.name))
         if len(minval.name) < minlen:
             res.append(minval)
         return res
@@ -181,7 +186,7 @@ out meta;
             lonmax=max(lon1, lon2),
             distance=int(distance)
         )
-        #print("Query:", query)
+        # print("Query:", query)
         response = self.api.Get(query)
         for f in response["features"]:
             try:
@@ -190,42 +195,44 @@ out meta;
                 continue
 
 
-#def load_data(center, bbox_side=0.5):
-#    """
-#    Load place name data for our area, given a (lat, lon) center and a bounding
-#    box side length in degrees
-#    """
-#    info = {
-#        "left": center[1] - bbox_side/2,
-#        "bottom": center[0] - bbox_side/2,
-#        "right": center[1] + bbox_side/2,
-#        "top": center[0] + bbox_side/2,
-#        "side": bbox_side,
-#    }
-#    cache = "{left},{bottom},{right},{top}-{side}.xml".format(**info)
-#    try:
-#        with open(cache, "r") as fd:
-#            dom = ET.fromstring(fd.read())
-#    except IOError:
-#        url = "http://overpass.osm.rambler.ru/cgi/xapi_meta"
-#        print("Fetching places from {}...".format(url))
-#        query = "node({left},{bottom},{right},{top}); out body;".format(**info)
-#        print("query:", query)
-#        #url = "http://jxapi.openstreetmap.org/xapi/api/0.6/node[place=*][bbox={left},{bottom},{right},{top}]".format(**info)
-#        #print(url)
-#        res = requests.post(url, data={"data": query})
-#        text = res.text.encode("utf8")
-#        print(text)
-#        dom = ET.fromstring(text)
-#        with open(cache, "w") as fd:
-#            fd.write(text)
-#    return dom
+# def load_data(center, bbox_side=0.5):
+#     """
+#     Load place name data for our area, given a (lat, lon) center and a bounding
+#     box side length in degrees
+#     """
+#     info = {
+#         "left": center[1] - bbox_side/2,
+#         "bottom": center[0] - bbox_side/2,
+#         "right": center[1] + bbox_side/2,
+#         "top": center[0] + bbox_side/2,
+#         "side": bbox_side,
+#     }
+#     cache = "{left},{bottom},{right},{top}-{side}.xml".format(**info)
+#     try:
+#         with open(cache, "r") as fd:
+#             dom = ET.fromstring(fd.read())
+#     except IOError:
+#         url = "http://overpass.osm.rambler.ru/cgi/xapi_meta"
+#         print("Fetching places from {}...".format(url))
+#         query = "node({left},{bottom},{right},{top}); out body;".format(**info)
+#         print("query:", query)
+#         #url = ("http://jxapi.openstreetmap.org/xapi/api/0.6/node[place=*]"
+#                 "[bbox={left},{bottom},{right},{top}]".format(**info)
+#         #print(url)
+#         res = requests.post(url, data={"data": query})
+#         text = res.text.encode("utf8")
+#         print(text)
+#         dom = ET.fromstring(text)
+#         with open(cache, "w") as fd:
+#             fd.write(text)
+#     return dom
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("place", metavar="string", help="Place name to use as a center")
-    parser.add_argument("--distance", metavar="km", type=float, default=20, help="Distance in km from the place, where names are looked up")
+    parser.add_argument("--distance", metavar="km", type=float, default=20,
+                        help="Distance in km from the place, where names are looked up")
     args = parser.parse_args()
 
     osmspell = Osmspell()
